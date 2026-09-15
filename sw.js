@@ -1,6 +1,6 @@
 /* ATLAS ADO Suite - offline cache.
    Bump CACHE when you upload a new index.html. */
-const CACHE = 'atlas-v2';
+const CACHE = 'atlas-v3';
 const SHELL = ['./', './index.html', './manifest.webmanifest',
                './icon-192.png', './icon-512.png', './icon-maskable-512.png', './logo.png'];
 
