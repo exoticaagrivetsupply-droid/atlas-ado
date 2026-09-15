@@ -354,6 +354,17 @@ function blank(){return{
 };}
 let db=blank();
 let VIEW='dash', SUB=null, FILTER='all', Q='', MONTH=null;
+/* The herd screen is the one place where half-finished work lives in the page
+   itself rather than in a record. A cloud sync landing mid-typing used to wipe
+   it. The draft is lifted out before any redraw and put straight back after. */
+let HERDDRAFT=null;
+function grabHerdDraft(){
+  const box=document.getElementById('herdRows'); if(!box||!SUB) return;
+  HERDDRAFT={id:SUB, rows:[...box.querySelectorAll('.herdline')].map(r=>({
+    stage:r.querySelector('.hs').value,
+    heads:r.querySelector('.hh').value,
+    brand:r.querySelector('.hb').value}))};
+}
 let AREAF='all', ADOF='all';
 
 /* ---------- storage ---------- */
@@ -516,6 +527,21 @@ function clean(a){ return a.filter(Boolean); }
    ============================================================ */
 function rate(stage){ const r=db.meta.rates||DEFRATE; return num(r[stage]!=null?r[stage]:DEFRATE[stage]); }
 function herdOf(c){ return (c&&Array.isArray(c.herd))?c.herd:[]; }
+/* Every brand name anybody has typed anywhere \u2014 the competitor file, a herd
+   line, or a dealer's "brands carried" list. One place, so the suggestions on
+   the herd screen already know what the dealer down the road is carrying. */
+function splitBrands(str){ return String(str||'').split(/[,;/]+/).map(x=>x.trim()).filter(Boolean); }
+function knownBrands(){
+  const set=new Map();
+  const add=b=>{ const t=String(b||'').trim(); if(!t) return;
+    const k=t.toLowerCase(); if(!set.has(k)) set.set(k,t); };
+  add(ourBrand());
+  db.competitors.forEach(c=>add(c.brand));
+  db.customers.forEach(c=>{ herdOf(c).forEach(l=>add(l.brand)); splitBrands(c.brands).forEach(add); });
+  const all=[...set.values()];
+  const ours=all.filter(b=>isOurs(b)), rest=all.filter(b=>!isOurs(b)).sort((a,b)=>a.localeCompare(b));
+  return ours.concat(rest);
+}
 function headCount(c){ return herdOf(c).reduce((a,l)=>a+num(l.heads),0); }
 function sowCount(c){ return herdOf(c).filter(l=>l.stage==='sow_g'||l.stage==='sow_l').reduce((a,l)=>a+num(l.heads),0); }
 /* bags a month this farm eats, all brands */
@@ -539,7 +565,7 @@ function dealerBags(c){
 }
 function dealerByBrand(c){
   const out={};
-  const listed=String(c.brands||'').split(/[,;/]+/).map(s=>s.trim()).filter(Boolean);
+  const listed=splitBrands(c.brands);
   if(num(c.dealerBags)&&listed.length){
     const each=num(c.dealerBags)/listed.length;
     listed.forEach(b=>out[b]=(out[b]||0)+each);
@@ -594,7 +620,7 @@ function isActive(c){ return ['ACTIVE','GROWING','DECLINING'].includes(custState
 function onCompetitor(c){
   if(c.status==='prospect') return false;
   if(c.isRaiser){ const s=ourShareOf(c); if(s.tot>0&&s.pct<100) return true; }
-  if(c.isDealer){ const b=String(c.brands||''); if(b&&!b.split(/[,;/]+/).every(x=>isOurs(x))) return true; }
+  if(c.isDealer){ const b=splitBrands(c.brands); if(b.length&&!b.every(isOurs)) return true; }
   return false;
 }
 function salesScoped(month){
@@ -820,7 +846,10 @@ function drawTabs(){
   $('tabs').innerHTML=tabs.map(k=>{const [l,i]=TABMETA[k];
     return `<button class="${VIEW===k?'on':''}" onclick="go('${k}')"><svg viewBox="0 0 24 24">${ICON[i]}</svg>${l}</button>`;}).join('');
 }
-function go(v,sub){ VIEW=v; SUB=sub||null; Q=''; try{window.scrollTo(0,0);}catch(e){} render(); }
+function go(v,sub){
+  if(v!=='herd') HERDDRAFT=null;
+  VIEW=v; SUB=sub||null; Q=''; try{window.scrollTo(0,0);}catch(e){} render();
+}
 function toast(msg){
   const old=document.querySelector('.toast'); if(old) old.remove();
   const d=document.createElement('div'); d.className='toast'; d.textContent=msg;
@@ -927,6 +956,7 @@ function crumb(){
   return '';
 }
 function render(){
+  if(VIEW==='herd') grabHerdDraft();
   syncChip();
   const t=new Date();
   const lbl=$('todayLbl'); if(lbl) lbl.innerHTML=MON[t.getMonth()]+' '+t.getDate()+', '+t.getFullYear()+'<br>'+ftime(t.toISOString());
@@ -1404,49 +1434,76 @@ function delCust(id){
 /* ---- the herd editor: the profiling screen ---- */
 function vHerd(){
   const c=custOf(SUB); if(!c) return vCust();
-  const herd=herdOf(c);
-  const brands=[...new Set([ourBrand()].concat(db.competitors.map(x=>x.brand))
-    .concat(db.customers.flatMap(x=>herdOf(x).map(l=>l.brand))).filter(Boolean))];
+  const saved=herdOf(c);
+  const draft=(HERDDRAFT&&HERDDRAFT.id===c.id)?HERDDRAFT.rows:null;
+  const rows=draft||saved;
+  const brands=knownBrands();
   let h=`<button class="backlink" onclick="go('customer','${c.id}')">\u2039 ${esc(c.name)}</button>`;
   h+=pageHead('Herd profile','How many head at each stage, and what brand each stage is actually fed.');
   h+=`<datalist id="brandlist">${brands.map(b=>`<option value="${esc(b)}">`).join('')}</datalist>`;
-  h+=`<div class="card"><div id="herdRows">${herd.map((l,i)=>herdRow(l,i,brands)).join('')||
+  h+=`<div class="card"><div id="herdRows">${rows.map((l,i)=>herdRow(l,i,brands)).join('')||
     '<div class="empty" id="herdEmpty">No lines yet. Add one for every stage on the farm.</div>'}</div>
     <button class="btn ghost wide" style="margin-top:8px" onclick="addHerdRow()">+ Add a stage</button>
     <div class="hint" style="margin-top:8px">A stage can appear twice if part of it is on one brand and part on another \u2014
-    that is exactly how a switch starts.</div>
+    that is exactly how a switch starts. Every line needs a number of head, or it is not counted.</div>
     <div class="grid2" style="margin-top:10px">
-      <button class="btn ghost" onclick="go('customer','${c.id}')">Cancel</button>
+      <button class="btn ghost" onclick="cancelHerd('${c.id}')">Cancel</button>
       <button class="btn" onclick="saveHerd('${c.id}')">Save the profile</button></div></div>`;
+  if(brands.length>1) h+=`<div class="card small"><b>Brands already on file</b>
+    <div class="row wrap" style="margin-top:7px">${brands.map(b=>
+      `<span class="tag sm ${isOurs(b)?'':'comp'}">${esc(b)}</span>`).join(' ')}</div>
+    <div class="muted tiny" style="margin-top:6px">These come up as you type in the brand box. A brand you type here for
+    the first time joins the list for everybody.</div></div>`;
   h+=`<div class="card small"><b>What a bag a month means here</b>
     <div class="muted" style="margin-top:5px">${STAGES.map(([k,l])=>l+': '+rate(k)+' bags/head').join(' \u00b7 ')}.
     ${isManager()?'Change these in Settings if your field figures differ.':'The manager can tune these in Settings.'}</div></div>`;
   return h;
 }
 function herdRow(l,i,brands){
-  const bl=brands&&brands.length?brands:[ourBrand()];
   return `<div class="herdline" data-i="${i}">
     <select class="hs">${STAGES.map(([k,lbl])=>`<option value="${k}" ${l&&l.stage===k?'selected':''}>${lbl}</option>`).join('')}</select>
-    <input class="hh" type="number" inputmode="numeric" min="0" placeholder="0" value="${l?esc(l.heads):''}">
+    <input class="hh" type="number" inputmode="numeric" min="0" placeholder="head" value="${l&&l.heads!==''&&l.heads!=null?esc(l.heads):''}">
     <input class="hb" list="brandlist" placeholder="brand" value="${l?esc(l.brand||ourBrand()):esc(ourBrand())}">
-    <button onclick="this.parentNode.remove()" title="remove">\u00d7</button>
+    <button onclick="dropHerdRow(this)" title="remove">\u00d7</button>
   </div>`;
 }
 function addHerdRow(){
-  const box=$('herdRows'); const e=$('herdEmpty'); if(e) e.remove();
-  const brands=[...new Set([ourBrand()].concat(db.competitors.map(x=>x.brand)).filter(Boolean))];
-  const d=document.createElement('div'); d.innerHTML=herdRow(null,box.children.length,brands);
+  const box=$('herdRows'); if(!box) return;
+  const e=$('herdEmpty'); if(e) e.remove();
+  const d=document.createElement('div');
+  d.innerHTML=herdRow(null,box.children.length,knownBrands());
   box.appendChild(d.firstElementChild);
+  grabHerdDraft();
+  const last=box.lastElementChild.querySelector('.hh'); if(last) last.focus();
 }
+function dropHerdRow(btn){
+  const box=$('herdRows');
+  btn.parentNode.remove();
+  grabHerdDraft();
+  if(box&&!box.children.length) box.innerHTML='<div class="empty" id="herdEmpty">No lines yet. Add one for every stage on the farm.</div>';
+}
+function cancelHerd(id){ HERDDRAFT=null; go('customer',id); }
 function saveHerd(id){
   const c=custOf(id); if(!c) return;
   const rows=[...document.querySelectorAll('#herdRows .herdline')];
-  const herd=rows.map(r=>({stage:r.querySelector('.hs').value,
-    heads:num(r.querySelector('.hh').value), brand:(r.querySelector('.hb').value||ourBrand()).trim()}))
-    .filter(l=>l.heads>0);
+  const all=rows.map(r=>({stage:r.querySelector('.hs').value,
+    heads:num(r.querySelector('.hh').value),
+    brand:(r.querySelector('.hb').value||ourBrand()).trim()}));
+  const herd=all.filter(l=>l.heads>0);
+  const dropped=all.length-herd.length;
+  /* a line with no head count used to vanish without a word \u2014 say so instead */
+  if(dropped&&!herd.length){
+    grabHerdDraft();
+    return toast(all.length===1?'Put the number of head on the line before saving.'
+      :'Every line needs a number of head. Nothing was saved.');
+  }
+  if(dropped) toast(dropped+' line'+(dropped===1?'':'s')+' had no head count and '+(dropped===1?'was':'were')+' left out.');
   c.herd=herd; c.herdAt=todayISO(); c.herdBy=who();
   if(c.isRaiser&&!c.isDealer&&!c.ftype) c.ftype='Backyard';
-  save(); toast('Herd profile saved \u2014 '+nf(herdBags(c))+' bags a month.'); go('customer',id);
+  HERDDRAFT=null;
+  save();
+  setTimeout(()=>toast('Herd profile saved \u2014 '+nf(herdBags(c))+' bags a month.'),dropped?1200:0);
+  go('customer',id);
 }
 
 /* ============================================================
@@ -1941,7 +1998,7 @@ function vComp(){
     if(c.isRaiser) Object.entries(herdByBrand(c)).forEach(([b,v])=>{
       if(isOurs(b)) return; (byBrand[b]=byBrand[b]||{bags:0,list:[]}); byBrand[b].bags+=v;
       if(!byBrand[b].list.includes(c)) byBrand[b].list.push(c); });
-    if(c.isDealer) String(c.brands||'').split(/[,;/]+/).map(s=>s.trim()).filter(s=>s&&!isOurs(s))
+    if(c.isDealer) splitBrands(c.brands).filter(s=>!isOurs(s))
       .forEach(b=>{ (byBrand[b]=byBrand[b]||{bags:0,list:[]}); if(!byBrand[b].list.includes(c)) byBrand[b].list.push(c); });
   });
   const brands=Object.entries(byBrand).sort((a,b)=>b[1].bags-a[1].bags);
@@ -3327,8 +3384,8 @@ async function syncNow(silent){
   try{
     const rows=await api('atlas_state?id=eq.'+encodeURIComponent(CLOUD.team)+'&select=rev,data,updated_at,updated_by');
     const row=rows&&rows[0];
-    let rev=CLOUD.rev||0, changed=!row;
-    if(row){ if(row.rev!==CLOUD.rev){ db=mergeDB(db,row.data||{},!CLOUD.dirty); changed=true; } rev=row.rev; }
+    let rev=CLOUD.rev||0, changed=!row, pulled=false;
+    if(row){ if(row.rev!==CLOUD.rev){ db=mergeDB(db,row.data||{},!CLOUD.dirty); changed=true; pulled=true; } rev=row.rev; }
     if(changed||CLOUD.dirty){
       const body=[{id:CLOUD.team,rev:rev+1,data:db,updated_at:new Date().toISOString(),
         updated_by:(SESSION?SESSION.name:'device')}];
@@ -3342,7 +3399,9 @@ async function syncNow(silent){
     try{ localStorage.setItem(KEY,JSON.stringify(db)); }catch(e){}
     setSync('ok','Synced '+ftime(CLOUD.lastAt));
     if(!silent) toast('Everything is in step.');
-    if(SESSION||!db.users.length) render();
+    /* only redraw when something actually arrived, so a quiet background sync
+       never interrupts somebody mid-form */
+    if(pulled||!silent){ if(SESSION||!db.users.length) render(); }
   }catch(e){
     if(CLOUD){ CLOUD.dirty=true; storeCloud(); }
     setSync('bad','Not sent yet: '+e.message);
