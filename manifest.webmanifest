@@ -1,0 +1,29 @@
+{
+  "name": "ATLAS ADO Sales & Market Intelligence Suite",
+  "short_name": "ATLAS ADO",
+  "description": "Territory, customer, hog raiser, competitor, route and sales tracking for Area Development Officers.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F1F6F2",
+  "theme_color": "#0B4A21",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
